@@ -56,9 +56,6 @@ Step 3. Setup DocumentDB using Docker
 
 ```bash
 
-   # Remove any existing DocumentDB image
-   docker image rm -f ghcr.io/documentdb/documentdb/documentdb-local:latest || echo "No existing documentdb image to remove"
-
    # Pull the latest DocumentDB Docker image
    docker pull ghcr.io/documentdb/documentdb/documentdb-local:latest
 
@@ -67,6 +64,7 @@ Step 3. Setup DocumentDB using Docker
 
    # Run the container with your chosen username and password
    docker run -dt -p 10260:10260 --name documentdb-container documentdb --username <YOUR_USERNAME> --password <YOUR_PASSWORD>
+   docker image rm -f ghcr.io/documentdb/documentdb/documentdb-local:latest || echo "No existing documentdb image to remove"
 
 ```
 
@@ -161,6 +159,21 @@ for eachDocument in results:
     print(eachDocument)
 
 ```
+
+### Create an index
+
+DocumentDB provides a public SQL API for creating and managing indexes on collections. Use `documentdb_api_v2.create_indexes_background` to create one or more indexes and **wait for the build to complete** before the call returns:
+
+```sql
+SELECT ok, retval
+FROM documentdb_api_v2.create_indexes_background(
+    'mydb',
+    '{ "createIndexes": "myCollection",
+       "indexes": [ { "key": { "fieldName": 1 }, "name": "fieldName_1" } ] }'::documentdb_core.bson
+);
+```
+
+When `ok` is `true` all requested indexes are built and ready to use. For the full parameter and return-value reference, including how to drop indexes and information about the internal `create_indexes_non_concurrently` and `check_build_index_status` helpers, see the [Index Management documentation](docs/v1/index-management.md).
 
 ### Helpful Links
 
