@@ -1495,6 +1495,9 @@ PreprocessInsertionDoc(const bson_value_t *docValue, MongoCollection *collection
 	/* make sure the document has an _id and it is in the right place */
 	pgbson *insertDoc = RewriteDocumentValueAddObjectId(docValue);
 
+	/* fill in Timestamp(0, 0) sentinel values with the current server timestamp */
+	insertDoc = RewriteTimestampZeroValues(insertDoc);
+
 	PgbsonValidateInputBson(insertDoc, BSON_VALIDATE_NONE);
 
 	/*

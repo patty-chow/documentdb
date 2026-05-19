@@ -627,6 +627,98 @@ RewriteDocumentWithCustomObjectId(pgbson *document,
 
 
 /*
+ * RewriteTimestampZeroValues replaces top-level BSON Timestamp fields whose
+ * value is Timestamp(0, 0) with the current server timestamp, matching
+ * MongoDB's "server, fill this in" sentinel semantics for inserts.
+ *
+ * Only top-level fields are inspected; nested documents and array elements
+ * are left untouched (this matches MongoDB behavior). The "_id" field is
+ * also skipped, since MongoDB does not rewrite _id timestamps even when they
+ * are Timestamp(0, 0).
+ *
+ * If no eligible zero timestamps are present, the original document is
+ * returned to avoid an unnecessary rebuild.
+ */
+pgbson *
+RewriteTimestampZeroValues(pgbson *document)
+{
+	bson_iter_t iter;
+	PgbsonInitIterator(document, &iter);
+
+	bool hasZeroTimestamp = false;
+	while (bson_iter_next(&iter))
+	{
+		if (bson_iter_type(&iter) != BSON_TYPE_TIMESTAMP)
+		{
+			continue;
+		}
+
+		if (strcmp(bson_iter_key(&iter), "_id") == 0)
+		{
+			continue;
+		}
+
+		uint32_t t = 0;
+		uint32_t i = 0;
+		bson_iter_timestamp(&iter, &t, &i);
+		if (t == 0 && i == 0)
+		{
+			hasZeroTimestamp = true;
+			break;
+		}
+	}
+
+	if (!hasZeroTimestamp)
+	{
+		return document;
+	}
+
+	struct timespec spec;
+	clock_gettime(CLOCK_REALTIME, &spec);
+	uint32_t currentTime = (uint32_t) spec.tv_sec;
+
+	/*
+	 * Backend-local counter so that multiple Timestamp(0, 0) values within
+	 * the same wall-clock second get distinct increments. Two backends
+	 * inserting in the same second may still produce identical (t, i) pairs,
+	 * which mirrors the relaxed guarantees of this rewrite.
+	 */
+	static uint32_t timestampIncrement = 0;
+
+	pgbson_writer writer;
+	PgbsonWriterInit(&writer);
+
+	PgbsonInitIterator(document, &iter);
+	while (bson_iter_next(&iter))
+	{
+		const char *key = bson_iter_key(&iter);
+		uint32_t keyLen = bson_iter_key_len(&iter);
+
+		if (bson_iter_type(&iter) == BSON_TYPE_TIMESTAMP &&
+			strcmp(key, "_id") != 0)
+		{
+			uint32_t t = 0;
+			uint32_t i = 0;
+			bson_iter_timestamp(&iter, &t, &i);
+			if (t == 0 && i == 0)
+			{
+				bson_value_t newTs;
+				newTs.value_type = BSON_TYPE_TIMESTAMP;
+				newTs.value.v_timestamp.timestamp = currentTime;
+				newTs.value.v_timestamp.increment = ++timestampIncrement;
+				PgbsonWriterAppendValue(&writer, key, keyLen, &newTs);
+				continue;
+			}
+		}
+
+		PgbsonWriterAppendValue(&writer, key, keyLen, bson_iter_value(&iter));
+	}
+
+	return PgbsonWriterGetPgbson(&writer);
+}
+
+
+/*
  * For write procedures, commits and re-acquires the collection lock.
  */
 void
