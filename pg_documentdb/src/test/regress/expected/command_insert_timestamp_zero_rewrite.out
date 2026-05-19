@@ -2,13 +2,11 @@ SET search_path TO documentdb_api,documentdb_core,documentdb_api_catalog;
 SET documentdb_core.bsonUseEJson TO true;
 SET documentdb.next_collection_id TO 2400;
 SET documentdb.next_collection_index_id TO 2400;
-
 -- Start from a clean collection so the test is deterministic regardless of
 -- prior session state. Wrapped in a DO block so the return value (which
 -- differs depending on whether the collection existed) does not appear in
 -- the .out file.
 DO $$ BEGIN PERFORM documentdb_api.drop_collection('db', 'tsrewrite'); END $$;
-
 -- pg_temp.tsfix_get_stored: insert a document, look up the storage table for
 -- the collection 'db.tsrewrite' (so the test works no matter what
 -- collection id ends up being allocated), then return the stored doc as json.
@@ -35,7 +33,6 @@ BEGIN
     RETURN stored;
 END
 $func$ LANGUAGE plpgsql;
-
 -- pg_temp.tsfix_path: navigate `obj` via a dotted path. Returns NULL if any
 -- segment is missing.
 CREATE OR REPLACE FUNCTION pg_temp.tsfix_path(obj json, fieldPath text)
@@ -49,7 +46,6 @@ BEGIN
     RETURN obj;
 END
 $$ LANGUAGE plpgsql;
-
 -- pg_temp.assert_ts_rewritten: insert `docJson`, expect the timestamp at
 -- `fieldPath` to be rewritten to (current_time, >0). Returns 'TEST PASSED' /
 -- 'TEST FAILED: ...' so the .out file is stable across runs.
@@ -84,7 +80,6 @@ BEGIN
     RETURN 'TEST PASSED';
 END
 $func$ LANGUAGE plpgsql;
-
 -- pg_temp.assert_ts_preserved: insert `docJson`, expect the timestamp at
 -- `fieldPath` to match (expectedT, expectedI) exactly (i.e. not rewritten).
 CREATE OR REPLACE FUNCTION pg_temp.assert_ts_preserved(
@@ -110,25 +105,49 @@ BEGIN
     RETURN 'TEST PASSED';
 END
 $func$ LANGUAGE plpgsql;
-
 -- Top-level Timestamp(0,0) should be rewritten to the current server timestamp.
 SELECT pg_temp.assert_ts_rewritten(
     '{"_id":1, "k": {"$timestamp":{"t":0,"i":0}}}', 'k');
+psql:src/test/regress/sql/command_insert_timestamp_zero_rewrite.sql:116: NOTICE:  creating collection
+psql:src/test/regress/sql/command_insert_timestamp_zero_rewrite.sql:116: NOTICE:  using bson_query_match implementation
+psql:src/test/regress/sql/command_insert_timestamp_zero_rewrite.sql:116: NOTICE:  using bson_query_match implementation
+ assert_ts_rewritten 
+---------------------
+ TEST PASSED
+(1 row)
 
 -- Nested Timestamp(0,0) is NOT rewritten (top-level only, matches MongoDB).
 SELECT pg_temp.assert_ts_preserved(
     '{"_id":3, "nested": {"inner_ts": {"$timestamp":{"t":0,"i":0}}}}',
     'nested.inner_ts', 0, 0);
+psql:src/test/regress/sql/command_insert_timestamp_zero_rewrite.sql:121: NOTICE:  using bson_query_match implementation
+psql:src/test/regress/sql/command_insert_timestamp_zero_rewrite.sql:121: NOTICE:  using bson_query_match implementation
+ assert_ts_preserved 
+---------------------
+ TEST PASSED
+(1 row)
 
 -- _id of type Timestamp(0,0) is NOT rewritten.
 SELECT pg_temp.assert_ts_preserved(
     '{"_id": {"$timestamp":{"t":0,"i":0}}, "marker": "id-is-ts"}',
     '_id', 0, 0);
+psql:src/test/regress/sql/command_insert_timestamp_zero_rewrite.sql:126: NOTICE:  using bson_query_match implementation
+psql:src/test/regress/sql/command_insert_timestamp_zero_rewrite.sql:126: NOTICE:  using bson_query_match implementation
+ assert_ts_preserved 
+---------------------
+ TEST PASSED
+(1 row)
 
 -- Non-zero top-level timestamps must pass through unchanged.
 SELECT pg_temp.assert_ts_preserved(
     '{"_id":2, "k": {"$timestamp":{"t":1700000000,"i":7}}}',
     'k', 1700000000, 7);
+psql:src/test/regress/sql/command_insert_timestamp_zero_rewrite.sql:131: NOTICE:  using bson_query_match implementation
+psql:src/test/regress/sql/command_insert_timestamp_zero_rewrite.sql:131: NOTICE:  using bson_query_match implementation
+ assert_ts_preserved 
+---------------------
+ TEST PASSED
+(1 row)
 
 -- Multiple zero timestamps in the same document each get a distinct increment.
 CREATE OR REPLACE FUNCTION pg_temp.assert_distinct_increments() RETURNS text AS $func$
@@ -147,5 +166,11 @@ BEGIN
     RETURN 'TEST PASSED';
 END
 $func$ LANGUAGE plpgsql;
-
 SELECT pg_temp.assert_distinct_increments();
+psql:src/test/regress/sql/command_insert_timestamp_zero_rewrite.sql:151: NOTICE:  using bson_query_match implementation
+psql:src/test/regress/sql/command_insert_timestamp_zero_rewrite.sql:151: NOTICE:  using bson_query_match implementation
+ assert_distinct_increments 
+----------------------------
+ TEST PASSED
+(1 row)
+
